@@ -1,0 +1,12 @@
+[Unit]
+Description=Túnel reverso SOCKS5 para LotoBot
+
+[Service]
+Type=simple
+# Substitua os caminhos e o IPv6. Não mantenha dois serviços na porta 1080.
+ExecStart=/usr/bin/ssh -6 -N -T -i /CAMINHO/ABSOLUTO/loto-bot.pem -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/CAMINHO/ABSOLUTO/known_hosts -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -R 127.0.0.1:1080 ubuntu@SUBSTITUA_IPV6
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

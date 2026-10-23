@@ -1,0 +1,136 @@
+---
+- name: Atualizar código das EC2 existentes, preservando perfis e configuração
+  hosts: all
+  serial: 1
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Validar entradas
+      ansible.builtin.assert:
+        that:
+          - app_name in ['whatsapp-notify', 'loto-bot']
+          - release_sha is match('^[a-f0-9]{64}$')
+    - name: Verificar diretório atual
+      ansible.builtin.stat:
+        path: "/opt/{{ app_name }}/app"
+      register: current
+    - name: Exigir bootstrap concluído
+      ansible.builtin.assert:
+        that: current.stat.exists
+        fail_msg: "Aguarde o bootstrap CloudFormation concluir antes deste playbook."
+    - name: Definir caminho anterior
+      ansible.builtin.set_fact:
+        previous_path: "{{ current.stat.lnk_source if current.stat.islnk else '/opt/' + app_name + '/bootstrap-original' }}"
+        release_path: "/opt/{{ app_name }}/releases/{{ release_sha }}"
+    - name: Criar release
+      ansible.builtin.file:
+        path: "{{ release_path }}"
+        state: directory
+        owner: "{{ app_name }}"
+        group: "{{ app_name }}"
+        mode: "0755"
+    - name: Preservar histórico quando a release já está ativa
+      ansible.builtin.meta: end_host
+      when: current.stat.islnk and current.stat.lnk_source == release_path
+    - name: Copiar arquivo verificado localmente
+      ansible.builtin.copy:
+        src: "{{ release_zip }}"
+        dest: "/tmp/{{ app_name }}-{{ release_sha }}.zip"
+        mode: "0600"
+    - name: Conferir SHA256 remoto
+      ansible.builtin.stat:
+        path: "/tmp/{{ app_name }}-{{ release_sha }}.zip"
+        checksum_algorithm: sha256
+      register: archive
+    - name: Exigir integridade
+      ansible.builtin.assert:
+        that: archive.stat.checksum == release_sha
+    - name: Extrair código
+      ansible.builtin.unarchive:
+        src: "/tmp/{{ app_name }}-{{ release_sha }}.zip"
+        dest: "{{ release_path }}"
+        remote_src: true
+        owner: "{{ app_name }}"
+        group: "{{ app_name }}"
+        creates: "{{ release_path }}/.ready"
+    - name: Instalar release em virtualenv
+      ansible.builtin.command:
+        argv: [python3.12, -m, venv, "{{ release_path }}/.venv"]
+        creates: "{{ release_path }}/.venv/bin/python"
+    - name: Instalar dependências da aplicação
+      ansible.builtin.command:
+        argv: ["{{ release_path }}/.venv/bin/pip", install, "{{ release_path }}"]
+        creates: "{{ release_path }}/.ready"
+    - name: Instalar dependências Chromium
+      ansible.builtin.command:
+        argv: ["{{ release_path }}/.venv/bin/playwright", install-deps, chromium]
+        creates: "{{ release_path }}/.ready"
+    - name: Instalar Chromium como usuário da aplicação
+      ansible.builtin.command:
+        argv: [sudo, -u, "{{ app_name }}", "{{ release_path }}/.venv/bin/playwright", install, chromium]
+        creates: "{{ release_path }}/.ready"
+    - name: Registrar preparação concluída
+      ansible.builtin.copy:
+        content: "{{ release_sha }}\n"
+        dest: "{{ release_path }}/.ready"
+        mode: "0644"
+    - name: Validar proxy antes da troca
+      ansible.builtin.command: nginx -t
+      changed_when: false
+    - name: Trocar release com recuperação automática do código anterior
+      block:
+        - name: Parar aplicação
+          ansible.builtin.systemd_service:
+            name: "{{ app_name }}"
+            state: stopped
+        - name: Preservar instalação original na primeira atualização
+          ansible.builtin.command:
+            argv: [mv, "/opt/{{ app_name }}/app", "/opt/{{ app_name }}/bootstrap-original"]
+          when: not current.stat.islnk
+        - name: Apontar aplicação para release
+          ansible.builtin.file:
+            src: "{{ release_path }}"
+            dest: "/opt/{{ app_name }}/app"
+            state: link
+            force: true
+        - name: Iniciar aplicação
+          ansible.builtin.systemd_service:
+            name: "{{ app_name }}"
+            state: started
+        - name: Aplicar configuração Nginx
+          ansible.builtin.systemd_service:
+            name: nginx
+            state: reloaded
+        - name: Verificar API direta e proxy
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ item }}{{ health_path }}"
+            status_code: 200
+            timeout: 15
+          loop: [8000, 80]
+          register: health
+          until: health.status | default(0) == 200
+          retries: 20
+          delay: 3
+      rescue:
+        - name: Parar release com falha
+          ansible.builtin.systemd_service:
+            name: "{{ app_name }}"
+            state: stopped
+        - name: Restaurar caminho anterior
+          ansible.builtin.file:
+            src: "{{ previous_path }}"
+            dest: "/opt/{{ app_name }}/app"
+            state: link
+            force: true
+        - name: Reiniciar código anterior
+          ansible.builtin.systemd_service:
+            name: "{{ app_name }}"
+            state: started
+        - name: Reportar falha de implantação
+          ansible.builtin.fail:
+            msg: "Release reprovada; caminho anterior restaurado. Verifique journalctl."
+    - name: Registrar caminho para reversão manual
+      ansible.builtin.copy:
+        content: "{{ previous_path }}\n"
+        dest: "/opt/{{ app_name }}/previous-release"
+        mode: "0600"
