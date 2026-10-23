@@ -275,7 +275,7 @@ INSTANCE_ID=$(aws cloudformation describe-stack-resource \
 INSTANCE_IPV6=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
   --query 'Reservations[0].Instances[0].NetworkInterfaces[0].Ipv6Addresses[0].Ipv6Address' \
   --output text --profile "$AWS_PROFILE" --region "$AWS_REGION")
-SSH_OPTS=(-6 -i "$SSH_KEY" -o "UserKnownHostsFile=$KNOWN_HOSTS_FILE")
+SSH_OPTS=(-i "$SSH_KEY" -o "UserKnownHostsFile=$KNOWN_HOSTS_FILE")
 ```
 
 Confirme que `INSTANCE_ID` e `INSTANCE_IPV6` contêm valores válidos. O inventário/Ansible usa esse mesmo arquivo de hosts conhecidos. Se o SSH pedir confirmação de uma chave nova, confira a identidade da instância antes de aceitar.
@@ -409,9 +409,9 @@ INSTANCE_ID=$(aws cloudformation describe-stack-resource \
 INSTANCE_IPV6=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
   --query 'Reservations[0].Instances[0].NetworkInterfaces[0].Ipv6Addresses[0].Ipv6Address' \
   --output text --profile "$AWS_PROFILE" --region "$AWS_REGION")
-SSH_OPTS=(-6 -i "$SSH_KEY" -o "UserKnownHostsFile=$KNOWN_HOSTS_FILE")
+SSH_OPTS=(-i "$SSH_KEY" -o "UserKnownHostsFile=$KNOWN_HOSTS_FILE")
 ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$INSTANCE_IPV6" \
-  "curl --fail-with-body -i -sS --max-time 30 'http://127.0.0.1/api/v1/sessions/status'"
+  "curl -i -sS --max-time 30 'http://127.0.0.1/api/v1/sessions/status'"
 ```
 
 Confirme os valores de `INSTANCE_ID` e `INSTANCE_IPV6`. Reutilize o túnel systemd da etapa 7. Como alternativa temporária, se ainda não houver túnel, o bloco abaixo cria um com socket de controle. Ele preserva qualquer processo que já escute na porta 1080; não execute `fuser -k` para liberar a porta. Se houver um listener, valide a saída SOCKS nos comandos seguintes antes de considerá-lo funcional.
@@ -442,27 +442,27 @@ Valide a saída pelo SOCKS e o acesso HTTP ao portal:
 ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$INSTANCE_IPV6" \
   'curl -fsS --max-time 20 --socks5-hostname 127.0.0.1:1080 https://api.ipify.org && echo'
 ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$INSTANCE_IPV6" \
-  'curl --fail-with-body -sS -L --max-time 20 --socks5-hostname 127.0.0.1:1080 -o /dev/null -w "HTTP %{http_code}\n" "https://www.loteriasonline.caixa.gov.br/silce-web/#/termos-de-uso"'
+  'curl -sS -L --max-time 20 --socks5-hostname 127.0.0.1:1080 -o /dev/null -w "HTTP %{http_code}\n" "https://www.loteriasonline.caixa.gov.br/silce-web/#/termos-de-uso"'
 ```
 
 O segundo comando verifica a resposta HTTP inicial do site; o fragmento `#/termos-de-uso` é interpretado pelo navegador e não testa a navegação nem o login. Abra a sessão do bot, confira o status e encerre para validar o ciclo básico:
 
 ```bash
 ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$INSTANCE_IPV6" \
-  "curl --fail-with-body -i -sS --max-time 120 'http://127.0.0.1/api/v1/sessions/start'"
+  "curl -i -sS --max-time 120 'http://127.0.0.1/api/v1/sessions/start'"
 ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$INSTANCE_IPV6" \
-  "curl --fail-with-body -i -sS --max-time 30 'http://127.0.0.1/api/v1/sessions/status'"
+  "curl -i -sS --max-time 30 'http://127.0.0.1/api/v1/sessions/status'"
 ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$INSTANCE_IPV6" \
-  "curl --fail-with-body -i -sS --max-time 60 'http://127.0.0.1/api/v1/sessions/stop'"
+  "curl -i -sS --max-time 60 'http://127.0.0.1/api/v1/sessions/stop'"
 ```
 
 Para consultar apostas e conferir resultados, abra novamente a sessão:
 
 ```bash
 ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$INSTANCE_IPV6" \
-  "curl --fail-with-body -i -sS --max-time 120 'http://127.0.0.1/api/v1/sessions/start'"
+  "curl -i -sS --max-time 120 'http://127.0.0.1/api/v1/sessions/start'"
 ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$INSTANCE_IPV6" \
-  "curl --fail-with-body -i -sS --max-time 30 'http://127.0.0.1/api/v1/sessions/status'"
+  "curl -i -sS --max-time 30 'http://127.0.0.1/api/v1/sessions/status'"
 ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$INSTANCE_IPV6" \
   'curl -fsS --max-time 120 http://127.0.0.1/api/v1/history/bets' | jq .
 ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$INSTANCE_IPV6" \
@@ -477,11 +477,11 @@ ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$INSTANCE_IPV6" \
    sudo grep -qx 'CONFIRM_PAYMENT=true' /etc/loto-bot.env &&
    sudo systemctl restart loto-bot && sudo systemctl is-active loto-bot"
 ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$INSTANCE_IPV6" \
-  "curl --fail-with-body -i -sS --max-time 120 'http://127.0.0.1/api/v1/sessions/start'"
+  "curl -i -sS --max-time 120 'http://127.0.0.1/api/v1/sessions/start'"
 TEST_JSON=$(jq -n --arg selected_lottery_modality QUINA \
   '{selected_lottery_modality:$selected_lottery_modality}')
 printf '%s' "$TEST_JSON" | ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$INSTANCE_IPV6" \
-  "curl --fail-with-body -i -sS --max-time 120 -X POST 'http://127.0.0.1/api/v1/bets/run' -H 'Content-Type: application/json; charset=utf-8' --data-binary @-"
+  "curl -i -sS --max-time 120 -X POST 'http://127.0.0.1/api/v1/bets/run' -H 'Content-Type: application/json; charset=utf-8' --data-binary @-"
 ```
 
 Para conferir resultados, use a data de São Paulo, como a aplicação. Ajuste o intervalo se quiser incluir apostas de outros dias. `month_year` aceita `LAST_7_DAYS`, não `ALL`. O comando preserva o corpo de respostas HTTP de erro:
@@ -493,9 +493,9 @@ TEST_JSON=$(jq -n --arg day "$TEST_DATE" '{
   bet_type:"INDIVIDUAL",draw_type:"ALL",month_year:"LAST_7_DAYS",status:"ALL"
 }')
 printf '%s' "$TEST_JSON" | ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$INSTANCE_IPV6" \
-  "curl --fail-with-body -i -sS --max-time 120 -X POST 'http://127.0.0.1/api/v1/bets/check_draws' -H 'Content-Type: application/json; charset=utf-8' --data-binary @-"
+  "curl -i -sS --max-time 120 -X POST 'http://127.0.0.1/api/v1/bets/check_draws' -H 'Content-Type: application/json; charset=utf-8' --data-binary @-"
 ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$INSTANCE_IPV6" \
-  "curl --fail-with-body -i -sS --max-time 60 'http://127.0.0.1/api/v1/sessions/stop'"
+  "curl -i -sS --max-time 60 'http://127.0.0.1/api/v1/sessions/stop'"
 ```
 
 Se habilitou pagamento somente para o teste, restaure `CONFIRM_PAYMENT=false` e mantenha o parâmetro Terraform alinhado antes de liberar a operação:
@@ -579,6 +579,22 @@ bash scripts/check-scheduler.sh
 ```
 
 Para a habilitação dos dois jobs, a verificação deve exibir `RunBetScheduleName: ENABLED` e `CheckDrawsScheduleName: ENABLED`. O script também confere a Lambda ativa, a tabela disponível e o fuso dos agendamentos; não invoca jobs. Os jobs executarão nos horários configurados. Os crons usam `America/Sao_Paulo`; o conversor original interpreta segunda-feira como 0, portanto `1,3,5` corresponde a terça, quinta e sábado.
+
+Para exibir os logs do scheduler dos últimos 10 minutos e acompanhar novas mensagens, execute o bloco abaixo. O nome da função é consultado nos outputs da stack configurada em `terraform.tfvars.json`. Use outro terminal para acompanhar as execuções e pressione `Ctrl+C` para encerrar o acompanhamento.
+
+```bash
+(
+  set -euo pipefail
+  SCHEDULER_STACK=$(jq -er '.stack_names.scheduler | select(type == "string" and length > 0)' terraform.tfvars.json)
+  FUNCTION_NAME=$(aws cloudformation describe-stacks \
+    --stack-name "$SCHEDULER_STACK" \
+    --query "Stacks[0].Outputs[?OutputKey=='FunctionName'].OutputValue | [0]" \
+    --output text --profile "$AWS_PROFILE" --region "$AWS_REGION")
+  [[ -n "$FUNCTION_NAME" && "$FUNCTION_NAME" != None ]] || { echo 'FunctionName ausente'; }
+  aws logs tail "/aws/lambda/$FUNCTION_NAME" --since 10m --follow \
+    --profile "$AWS_PROFILE" --region "$AWS_REGION"
+)
+```
 
 Na adoção, os estados anteriores são preservados até você alterá-los; confira se deseja habilitar ambos antes de executar o bloco. Para pausar novamente sem perder os estados configurados, grave `scheduler_paused=true` em `maintenance.auto.tfvars.json`, gere e revise um novo plano e aplique-o, conforme a etapa 4.
 

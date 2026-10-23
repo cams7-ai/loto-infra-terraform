@@ -30,6 +30,7 @@ Nenhum comando de deploy roda ao abrir o projeto. A preparação envia artefatos
 - `FUNDACAO.md`: criação do ambiente vazio e configuração dos secrets/SES.
 - `ROLLBACK.md`: desmontagem definitiva das aplicações e da fundação, com tratamento dos dados e recursos restantes.
 - `scripts/configure-new.sh`: gera a configuração inicial a partir dos outputs da fundação.
+- `scripts/plan-foundation.sh`: restaura/importa secrets existentes antes de planejar a fundação; cria as ausentes no apply.
 - `scripts/adopt.sh`: captura configuração atual e importa stacks.
 - `scripts/prepare.sh`: build e upload das releases.
 - `scripts/inventory.sh`: inventário IPv6 e integridade dos ZIPs.

@@ -52,25 +52,29 @@ jq -n --arg account "$EXPECTED_ACCOUNT_ID" --arg region "$AWS_REGION" \
 ```bash
 terraform -chdir=foundation init
 terraform -chdir=foundation validate
-terraform -chdir=foundation plan -out=foundation.tfplan
+bash scripts/plan-foundation.sh
 terraform -chdir=foundation show foundation.tfplan
 ```
 
-Revise conta, região, IPv6 `/128`, chave e nomes. O plano deve criar a rede/endpoints, bucket privado com AES256/versionamento/ACLs desabilitadas, chave pública EC2, dois contêineres de secrets, identidade SES e duas tabelas com PITR/proteção de exclusão. As tabelas usam criptografia padrão do DynamoDB com chave de propriedade da AWS. A de apostas usa `bet_id` String; a de execuções usa `pk` String, sem sort key/índices, TTL `expires_at`. Não há criação de aplicações nesta fase.
+O script consulta os nomes exatos `<name>/application` e `<name>/gmail-oauth-token` na conta/região configuradas em `foundation/`. Se a secret existe, importa seu ARN para o state antes do plano; se já está no state, não repete a importação. Se estiver agendada para exclusão, cancela esse agendamento com `restore-secret` antes de reutilizá-la. Somente `ResourceNotFoundException` é tratado como ausência; erros de permissão, credenciais ou rede interrompem a execução. Os valores e versões das secrets são preservados e não são lidos pelo script. Antes de importar em um state com recursos, salva um backup em `.local/foundation-before-secret-import.*.tfstate`.
+
+Use o mesmo perfil AWS do provider. O script lê defaults, arquivos tfvars de `foundation/` e `TF_VAR_*` com `terraform console`; não aceita argumentos de sobrescrita. Ele precisa de `secretsmanager:DescribeSecret` e, para secrets com exclusão agendada, `secretsmanager:RestoreSecret`, além das permissões usuais de importação/plano. Reutilize apenas secrets que pertençam a este ambiente e não sejam gerenciadas por outro state. A restauração e a importação acontecem ao executar o script; o plano ainda exige revisão e apply explícito. Veja [DescribeSecret](https://docs.aws.amazon.com/cli/latest/reference/secretsmanager/describe-secret.html), [RestoreSecret](https://docs.aws.amazon.com/cli/latest/reference/secretsmanager/restore-secret.html) e [importação Terraform](https://developer.hashicorp.com/terraform/cli/import).
+
+Revise conta, região, IPv6 `/128`, chave e nomes. O plano deve criar os recursos ausentes: rede/endpoints, bucket privado com AES256/versionamento/ACLs desabilitadas, chave pública EC2, dois contêineres de secrets, identidade SES e duas tabelas com PITR/proteção de exclusão. Secrets importadas não devem aparecer para criação; revise eventuais atualizações de metadados. As tabelas usam criptografia padrão do DynamoDB com chave de propriedade da AWS. A de apostas usa `bet_id` String; a de execuções usa `pk` String, sem sort key/índices, TTL `expires_at`. Não há criação de aplicações nesta fase.
 
 ```bash
-terraform -chdir=foundation apply foundation.tfplan
-terraform -chdir=foundation output -json configuration > .local/foundation.json
-export ARTIFACT_BUCKET=$(jq -er '.artifact_bucket' .local/foundation.json)
+terraform -chdir=foundation apply foundation.tfplan &&
+  terraform -chdir=foundation output -json configuration > .local/foundation.json &&
+  export ARTIFACT_BUCKET=$(jq -er '.artifact_bucket' .local/foundation.json)
 ```
 
-Se houver falha parcial, preserve `foundation/terraform.tfstate` e a chave. Corrija a causa, gere/revise outro plano no mesmo diretório e continue; não reinicie em outro state nem exclua recursos manualmente. Os nomes são exclusivos e não adotam recursos existentes automaticamente.
+Se houver falha parcial, preserve `foundation/terraform.tfstate` e a chave. Corrija a causa e execute novamente `bash scripts/plan-foundation.sh`, revise o novo plano e continue; não reutilize o plano antigo, reinicie em outro state ou exclua recursos manualmente. A reutilização automática cobre somente as duas secrets; os demais recursos existentes exigem importação explícita. Não consulte o output `configuration` após um apply com erro: ele pode ainda não existir, como no log de criação parcial.
 
 O state da fundação e o da raiz são independentes e começam locais. Faça backup protegido de ambos. O bucket de artefatos não é um backend de state automaticamente; configure um backend protegido conforme [OPERACAO.md](OPERACAO.md) se necessário, com chaves de state distintas para fundação e aplicações.
 
 ## 3. Preencher os secrets fora do Terraform
 
-Terraform cria somente os nomes/ARNs dos secrets. **Antes de implantar aplicações**, publique uma versão válida em cada um. Não adicione valores secretos a `.tfvars`, argumentos literais, commits ou logs.
+Terraform gerencia somente os contêineres/ARNs dos secrets. **Antes de implantar aplicações**, confira `AWSCURRENT` conforme os comandos ao final desta seção. Para secrets novas, publique uma versão válida em cada uma; para as reutilizadas, preserve as versões existentes e só atualize valores se necessário. Não adicione valores secretos a `.tfvars`, argumentos literais, commits ou logs.
 
 Para o bot, prepare o `.env` local do repositório `loto-bot` conforme seu guia, preenchendo `BETTOR_CPF`, `BETTOR_PASSWORD`, `CREDIT_CARD_LAST_DIGITS`, `CREDIT_CARD_SECURITY_CODE` e `MAIL_TO`. Instale as dependências do projeto, incluindo `python-dotenv`, no ambiente virtual desse repositório. O script da referência lê esse `.env` e produz o JSON esperado:
 
